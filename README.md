@@ -52,10 +52,11 @@ mk.fit(model, log_em)             # Baum–Welch: learn the dynamics (loglik nev
 ## Install
 
 ```bash
-pip install markovlib
+pip install marmo
 ```
 
-Requires Python 3.12+; `numpy` and `scipy` come with it.
+Published on PyPI as **`marmo`** (the name `markovlib` was already taken); the **import package is
+`markovlib`** — `import markovlib`. Requires Python 3.12+; `numpy` and `scipy` come with it.
 
 **From a checkout, with the dev extras** (`ruff`, `mypy`, `pytest`):
 

@@ -3,7 +3,7 @@ requires = ["hatchling>=1.25", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
 
 [project]
-name = "markovlib"
+name = "marmo"                       # PyPI distribution name (the import package is `markovlib`)
 dynamic = ["version"]                # derived from the latest vX.Y.Z git tag (hatch-vcs)
 description = "Markov-like processes as one recursion over a belief algebra and a semiring: HMM, HSMM, Kalman, and particle inference behind a decidable engine dispatch."
 readme = "README.md"

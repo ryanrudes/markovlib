@@ -194,7 +194,7 @@ wheels = [
 ]
 
 [[package]]
-name = "markovlib"
+name = "marmo"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },

@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/markovlib
+      url: https://pypi.org/p/marmo
     permissions:
       id-token: write  # OIDC token for Trusted Publishing — no stored secret
     steps:

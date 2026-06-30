@@ -12,7 +12,7 @@ This must be done once before the first release, by someone with PyPI access:
 1. Sign in at <https://pypi.org>. For a first publish of a brand-new project, use the
    **pending publisher** flow: <https://pypi.org/manage/account/publishing/>.
 2. Add a GitHub Actions trusted publisher with **exactly** these values:
-   - **PyPI Project Name:** `markovlib`
+   - **PyPI Project Name:** `marmo`  (the distribution name; the import package is `markovlib`)
    - **Owner:** `ryanrudes`
    - **Repository name:** `markovlib`
    - **Workflow name:** `release.yml`
@@ -41,7 +41,7 @@ point the publish step at TestPyPI (`with: repository-url: https://test.pypi.org
    gh run watch
    ```
 
-4. Verify: `pip install markovlib==0.1.0` (or check <https://pypi.org/project/markovlib/>).
+4. Verify: `pip install marmo==0.1.0` then `import markovlib` (or check <https://pypi.org/project/marmo/>).
 
 ## Notes
 
