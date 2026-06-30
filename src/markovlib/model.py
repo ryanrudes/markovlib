@@ -21,9 +21,12 @@ Float = npt.NDArray[np.float64]
 
 @dataclass(frozen=True)
 class DiscreteChain:
-    """A homogeneous finite-state Markov chain: log-initial ``(S,)`` and log-transition ``(S, S)``.
+    """A finite-state Markov chain: log-initial ``(S,)`` and a log-transition.
 
-    ``log_trans[i, j] = log P(state_t = j | state_{t-1} = i)``.
+    ``log_trans`` is either **homogeneous** — ``(S, S)`` with ``log_trans[i, j] = log P(state_{t+1} = j |
+    state_t = i)`` — or **time-varying** — ``(T-1, S, S)`` with ``log_trans[t]`` the step-``t`` →
+    step-``t+1`` transition (e.g. a contact-style gated/input-driven tensor). Every engine dispatches on
+    ``log_trans.ndim``, so both run the same code.
     """
 
     log_init: Float

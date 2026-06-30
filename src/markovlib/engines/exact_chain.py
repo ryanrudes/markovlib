@@ -86,9 +86,8 @@ class ExactChain:
         """
         log_alpha, beta, loglik = self._alpha_beta(model, log_emissions)
         gamma = self._gamma(log_alpha, beta)
-        log_xi = (
-            log_alpha[:-1, :, None] + model.log_trans[None, :, :] + (log_emissions[1:] + beta[1:])[:, None, :] - loglik
-        )
+        transition = model.log_trans[None, :, :] if model.log_trans.ndim == 2 else model.log_trans
+        log_xi = log_alpha[:-1, :, None] + transition + (log_emissions[1:] + beta[1:])[:, None, :] - loglik
         return ExpectedStats(gamma=gamma, xi=np.exp(log_xi), loglik=loglik)
 
     def decode(self, model: DiscreteChain, log_emissions: Float) -> npt.NDArray[np.intp]:

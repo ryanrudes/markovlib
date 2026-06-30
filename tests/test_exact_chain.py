@@ -15,6 +15,7 @@ import pytest
 from scipy.special import logsumexp
 
 import markovlib as mk
+from markovlib.engines.exact_chain import ExactChain
 
 
 def _random_chain(rng: np.random.Generator, n_states: int, n_steps: int):
@@ -26,12 +27,14 @@ def _random_chain(rng: np.random.Generator, n_states: int, n_steps: int):
 
 def _brute_force(log_init, log_trans, log_em):
     n_steps, n_states = log_em.shape
+    homogeneous = log_trans.ndim == 2
     paths = np.array(list(product(range(n_states), repeat=n_steps)))
     logps = np.empty(len(paths))
     for k, path in enumerate(paths):
         lp = log_init[path[0]] + log_em[0, path[0]]
         for t in range(1, n_steps):
-            lp += log_trans[path[t - 1], path[t]] + log_em[t, path[t]]
+            transition = log_trans if homogeneous else log_trans[t - 1]
+            lp += transition[path[t - 1], path[t]] + log_em[t, path[t]]
         logps[k] = lp
     loglik = float(logsumexp(logps))
     weights = np.exp(logps - loglik)
@@ -127,3 +130,39 @@ def test_n_states_reports_state_count():
 def test_query_raises_on_intractable_model():
     with pytest.raises(ValueError, match="no engine"):
         mk.smooth(object(), np.zeros((2, 2)))  # type: ignore[arg-type]
+
+
+def _random_inhomogeneous(rng: np.random.Generator, n_states: int, n_steps: int):
+    log_init = np.log(rng.dirichlet(np.ones(n_states)))
+    log_trans = np.log(
+        np.stack([np.stack([rng.dirichlet(np.ones(n_states)) for _ in range(n_states)]) for _ in range(n_steps - 1)])
+    )
+    log_em = np.log(rng.uniform(0.05, 1.0, size=(n_steps, n_states)))
+    return log_init, log_trans, log_em
+
+
+def test_smooth_time_inhomogeneous_matches_brute_force():
+    rng = np.random.default_rng(7)
+    for _ in range(20):
+        log_init, log_trans, log_em = _random_inhomogeneous(rng, int(rng.integers(2, 4)), int(rng.integers(2, 6)))
+        result = mk.smooth(mk.DiscreteChain(log_init, log_trans), log_em)
+        gamma, loglik, _ = _brute_force(log_init, log_trans, log_em)
+        assert np.allclose(result.gamma, gamma, atol=1e-9)
+        assert np.isclose(result.loglik, loglik, atol=1e-9)
+
+
+def test_decode_time_inhomogeneous_matches_brute_force():
+    rng = np.random.default_rng(8)
+    for _ in range(20):
+        log_init, log_trans, log_em = _random_inhomogeneous(rng, int(rng.integers(2, 4)), int(rng.integers(2, 6)))
+        path = mk.decode(mk.DiscreteChain(log_init, log_trans), log_em)
+        _, _, map_path = _brute_force(log_init, log_trans, log_em)
+        assert np.array_equal(path, map_path)
+
+
+def test_expected_stats_time_varying_identities():
+    rng = np.random.default_rng(9)
+    log_init, log_trans, log_em = _random_inhomogeneous(rng, 3, 6)
+    stats = ExactChain().expected_stats(mk.DiscreteChain(log_init, log_trans), log_em)
+    assert np.allclose(stats.xi.sum(axis=2), stats.gamma[:-1], atol=1e-9)
+    assert np.allclose(stats.xi.sum(axis=(1, 2)), 1.0, atol=1e-9)
