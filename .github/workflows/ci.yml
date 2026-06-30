@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read  # least privilege: jobs only read the repo
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0  # full history + tags so hatch-vcs can derive the version on install
+
+      - name: Set up uv + Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Create venv and install (with dev deps)
+        run: |
+          uv venv --clear  # setup-uv@v5 auto-creates a .venv; --clear avoids "already exists"
+          uv pip install -e '.[dev]'
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Type check (mypy --strict)
+        run: mypy
+
+      - name: Tests + 100% coverage gate
+        run: pytest --cov=markovlib
+
+  build:
+    # Validate that the package actually builds and its metadata is clean — so a packaging
+    # mistake is caught here, not at release time.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0  # hatch-vcs reads tags to compute the version
+
+      - name: Set up uv + Python 3.12
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Validate distribution metadata
+        run: uvx twine check dist/*
+
+      - name: Upload built distributions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: dist
+          path: dist/

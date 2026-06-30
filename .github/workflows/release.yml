@@ -1,0 +1,59 @@
+name: Release
+
+# Publishes to PyPI when a version tag is pushed. The version itself comes from the tag (hatch-vcs),
+# so the tag is the single source of truth — no version to bump by hand.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Publishing uses PyPI Trusted Publishing (OIDC): no API token is stored anywhere. One-time PyPI
+# setup is required first — see RELEASING.md.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read  # least privilege; the publish job overrides with id-token below
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs the tag to compute the version
+
+      - name: Set up uv + Python 3.12
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Validate distribution metadata
+        run: uvx twine check dist/*
+
+      - name: Upload built distributions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/markovlib
+    permissions:
+      id-token: write  # OIDC token for Trusted Publishing — no stored secret
+    steps:
+      - name: Download built distributions
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1

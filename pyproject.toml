@@ -1,38 +1,107 @@
+[build-system]
+requires = ["hatchling>=1.25", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
+
 [project]
 name = "markovlib"
-version = "0.0.1"
-description = "Markov-like processes as a factor graph with repeated temporal structure: one recursion, parameterized by a belief algebra + semiring."
+dynamic = ["version"]                # derived from the latest vX.Y.Z git tag (hatch-vcs)
+description = "Markov-like processes as one recursion over a belief algebra and a semiring: HMM, HSMM, Kalman, and particle inference behind a decidable engine dispatch."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["numpy>=1.26", "scipy>=1.11"]
+license = { text = "Apache-2.0" }
+authors = [{ name = "Ryan Rudes" }]
+keywords = [
+    "hidden-markov-model",
+    "hmm",
+    "hsmm",
+    "semi-markov",
+    "kalman-filter",
+    "rts-smoother",
+    "particle-filter",
+    "viterbi",
+    "forward-backward",
+    "baum-welch",
+    "state-space-model",
+    "bayesian-inference",
+    "time-series",
+    "probabilistic",
+    "markov",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11"]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+# The optional ``markovlib.fungeom`` bridge (Python 3.13+) also needs fungeom — which is not on PyPI,
+# so it is not declared here; install it from source alongside markovlib in a 3.13 environment.
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[project.urls]
+Repository = "https://github.com/ryanrudes/markovlib"
+Issues = "https://github.com/ryanrudes/markovlib/issues"
+Changelog = "https://github.com/ryanrudes/markovlib/blob/master/CHANGELOG.md"
+
+# Version comes from git tags (hatch-vcs). With no tag yet it falls back to the baseline below, so a
+# tag-less checkout still builds; once a `vX.Y.Z` tag exists it drives the version exactly.
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.1.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/markovlib"]
 
+[tool.hatch.build.targets.sdist]
+include = ["src/markovlib", "README.md", "LICENSE", "CHANGELOG.md"]
+
 [tool.ruff]
 line-length = 120
+target-version = "py312"
+exclude = [".venv"]
 
 [tool.mypy]
+python_version = "3.12"
+files = ["src/markovlib", "examples"]
 strict = true
-files = ["src"]
-# markovlib.fungeom is an optional Python-3.13 bridge that imports fungeom; it is excluded from the
-# 3.12 core gate (typed + tested separately in a 3.13 env — see examples/verify_fungeom_bridge.py).
-exclude = ["src/markovlib/fungeom.py"]
+warn_unreachable = true
+warn_unused_ignores = true
+# markovlib.fungeom is an optional Python-3.13 bridge that imports fungeom; it (and its 3.13 example)
+# are typed + verified separately, so they are excluded from the 3.12 core gate.
+exclude = ["src/markovlib/fungeom.py", "examples/verify_fungeom_bridge.py"]
 
 [[tool.mypy.overrides]]
-module = ["scipy.*"]
+module = ["scipy.*", "fungeom.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
+addopts = "-q --import-mode=importlib"
 testpaths = ["tests"]
-addopts = "-q"
+pythonpath = ["src"]
 
 [tool.coverage.run]
+source = ["markovlib"]
 omit = ["src/markovlib/fungeom.py"]  # the optional 3.13 bridge — verified separately, not in the 3.12 gate
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 100
+exclude_also = [
+    "if TYPE_CHECKING:",
+]
