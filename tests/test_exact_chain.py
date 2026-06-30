@@ -68,19 +68,32 @@ def test_decode_matches_brute_force_map():
 
 
 def test_one_recursion_two_semirings():
-    """The thesis: the SAME forward recursion gives α (sum-product) and δ (max-plus)."""
-    from markovlib.engines.recursion import forward_messages, viterbi
+    """The thesis: the SAME belief-generic recursion gives α (sum-product) and δ (max-plus)."""
+    from markovlib.belief import Categorical
+    from markovlib.engines.recursion import categorical_predict, forward, viterbi
 
     rng = np.random.default_rng(3)
     log_init, log_trans, log_em = _random_chain(rng, 3, 5)
     model = mk.DiscreteChain(log_init, log_trans)
+    factors = [mk.Categorical(row) for row in log_em]
+    initial = Categorical(log_init)
 
-    alpha = forward_messages(log_init, log_trans, log_em, mk.SumProduct())
-    assert np.isclose(logsumexp(alpha[-1]), mk.loglik(model, log_em))
+    alpha = forward(initial, categorical_predict(log_trans, mk.SumProduct()), factors)
+    assert np.isclose(alpha[-1].log_mass(), mk.loglik(model, log_em))
 
-    delta = forward_messages(log_init, log_trans, log_em, mk.MaxPlus())
+    delta = forward(initial, categorical_predict(log_trans, mk.MaxPlus()), factors)
     _, best = viterbi(log_init, log_trans, log_em)
-    assert np.isclose(delta[-1].max(), best)
+    assert np.isclose(float(delta[-1].log_p.max()), best)
+
+
+def test_categorical_belief_algebra():
+    a = mk.Categorical(np.log([0.2, 0.8]))
+    b = mk.Categorical(np.log([0.5, 0.5]))
+    combined = a.combine(b)
+    assert np.allclose(combined.log_p, np.log([0.1, 0.4]))
+    assert np.isclose(combined.log_mass(), np.log(0.5))
+    assert np.allclose(combined.normalized().probs(), [0.2, 0.8])
+    assert combined.mode() == 1
 
 
 def test_gamma_rows_are_distributions():

@@ -1,37 +1,53 @@
-"""The one forward recursion, plus the two second passes.
+"""The one forward recursion (belief-generic), plus the categorical second passes.
 
-:func:`forward_messages` is *the* load-bearing primitive: a single recursion whose only free choice is
-the semiring. With :class:`~markovlib.semiring.SumProduct` it is the forward pass ``α`` of
-forward–backward; with :class:`~markovlib.semiring.MaxPlus` it is the Viterbi score table ``δ``. The
-sum-product smoother adds a :func:`backward_messages` pass; the max-plus decoder adds argmax
-backpointers and a backtrace (:func:`viterbi`). That shared shape *is* the unification the library is
-built on — inference and decoding are one recursion in two semirings.
+:func:`forward` is *the* load-bearing primitive: a single recursion generic over the belief type and a
+``predict`` push-forward, touching the belief only through :meth:`~markovlib.belief.Belief.combine`. The
+categorical chain supplies :func:`categorical_predict` (a semiring matrix-vector push): with
+:class:`~markovlib.semiring.SumProduct` the messages are the forward ``α`` of forward–backward; with
+:class:`~markovlib.semiring.MaxPlus` they are the Viterbi score table ``δ``. The sum-product smoother
+adds :func:`backward_messages`; the max-plus decoder adds argmax backpointers + a backtrace
+(:func:`viterbi`). Same recursion shape, two semirings, any belief — the unification the library is
+built on.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import numpy.typing as npt
 from scipy.special import logsumexp
 
+from markovlib.belief import Belief, Categorical
 from markovlib.semiring import Semiring
 
 Float = npt.NDArray[np.float64]
 Int = npt.NDArray[np.intp]
 
 
-def forward_messages(log_init: Float, log_trans: Float, log_em: Float, semiring: Semiring) -> Float:
-    """The forward recursion ``msg[t, j] = em[t, j] ⊗ ⊕_i ( msg[t-1, i] ⊗ trans[i, j] )``.
+def forward[B: Belief](initial: B, predict: Callable[[B], B], factors: Sequence[B]) -> list[B]:
+    """The forward recursion ``msg[t] = predict(msg[t-1]) ⊗ factor[t]`` (``msg[0] = initial ⊗ factor[0]``).
 
-    ``⊗`` is ``+`` (log domain); ``⊕`` is ``semiring.reduce``. SumProduct → forward ``α``;
-    MaxPlus → Viterbi ``δ`` (scores only — see :func:`viterbi` for the backpointers).
+    Generic over the belief type ``B``: it touches the belief only through ``combine`` and the supplied
+    ``predict`` push-forward, so categorical / Gaussian / particle beliefs all run this one loop.
     """
-    n_steps, n_states = log_em.shape
-    msg = np.empty((n_steps, n_states), dtype=np.float64)
-    msg[0] = log_init + log_em[0]
-    for t in range(1, n_steps):
-        msg[t] = log_em[t] + semiring.reduce(msg[t - 1][:, None] + log_trans, axis=0)
-    return msg
+    messages = [initial.combine(factors[0])]
+    for t in range(1, len(factors)):
+        messages.append(predict(messages[t - 1]).combine(factors[t]))
+    return messages
+
+
+def categorical_predict(log_trans: Float, semiring: Semiring) -> Callable[[Categorical], Categorical]:
+    """The chain push-forward for categorical beliefs: ``b'[j] = ⊕_i ( b[i] ⊗ trans[i, j] )``.
+
+    ``⊗`` is ``+`` (log domain); ``⊕`` is ``semiring.reduce``. The closure captures the transition and
+    the semiring, so :func:`forward` stays oblivious to both.
+    """
+
+    def predict(belief: Categorical) -> Categorical:
+        return Categorical(semiring.reduce(belief.log_p[:, None] + log_trans, axis=0))
+
+    return predict
 
 
 def backward_messages(log_trans: Float, log_em: Float) -> Float:
@@ -46,8 +62,8 @@ def backward_messages(log_trans: Float, log_em: Float) -> Float:
 def viterbi(log_init: Float, log_trans: Float, log_em: Float) -> tuple[Int, float]:
     """Max-plus forward with argmax backpointers + backtrace → ``(map_path, best_logscore)``.
 
-    Shares the recursion *shape* of :func:`forward_messages` (semiring = MaxPlus) but additionally
-    records, at each step, which predecessor achieved the max — the backpointers a MAP path needs.
+    Shares the recursion *shape* of :func:`forward` (semiring = MaxPlus) but additionally records, at
+    each step, which predecessor achieved the max — the backpointers a single MAP path needs.
     """
     n_steps, n_states = log_em.shape
     delta = np.empty((n_steps, n_states), dtype=np.float64)

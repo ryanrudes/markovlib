@@ -8,6 +8,7 @@ queries (:func:`smooth` / :func:`decode` / :func:`loglik`).
 
 from __future__ import annotations
 
+from markovlib.belief import Belief, Categorical
 from markovlib.dispatch import resolve_engine
 from markovlib.engines.exact_chain import ExactChain, SmoothResult
 from markovlib.model import DiscreteChain
@@ -16,6 +17,8 @@ from markovlib.resolution import Approximate, EngineResolution, Exact, Intractab
 from markovlib.semiring import MaxPlus, Semiring, SumProduct
 
 __all__ = [
+    "Belief",
+    "Categorical",
     "DiscreteChain",
     "ExactChain",
     "SmoothResult",
