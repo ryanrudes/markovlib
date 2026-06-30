@@ -12,9 +12,10 @@ from __future__ import annotations
 
 from markovlib.engines.exact_chain import ExactChain
 from markovlib.engines.gaussian import GaussianChain
+from markovlib.engines.particle import ParticleFilter
 from markovlib.engines.segmental import SegmentalChain
-from markovlib.model import DiscreteChain, LinearGaussian, SemiMarkovChain
-from markovlib.resolution import EngineResolution, Exact, Intractable
+from markovlib.model import DiscreteChain, LinearGaussian, SemiMarkovChain, StateSpaceModel
+from markovlib.resolution import Approximate, EngineResolution, Exact, Intractable
 
 _CHAIN_QUERIES = frozenset({"smooth", "decode", "loglik"})
 
@@ -27,4 +28,6 @@ def resolve_engine(model: object, query: str) -> EngineResolution:
         return Exact(SegmentalChain())
     if isinstance(model, LinearGaussian) and query == "filter":
         return Exact(GaussianChain())
+    if isinstance(model, StateSpaceModel) and query == "filter":
+        return Approximate(ParticleFilter(), "bootstrap particle filter", "O(1/sqrt(N)) Monte Carlo")
     return Intractable(f"no engine for {type(model).__name__} / query={query!r}")

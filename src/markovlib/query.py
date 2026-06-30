@@ -15,8 +15,9 @@ import numpy.typing as npt
 from markovlib.dispatch import resolve_engine
 from markovlib.engines.exact_chain import ExactChain, SmoothResult
 from markovlib.engines.gaussian import FilterResult, GaussianChain
+from markovlib.engines.particle import ParticleFilter, ParticleResult
 from markovlib.engines.segmental import SegmentalChain
-from markovlib.model import DiscreteChain, LinearGaussian, SemiMarkovChain
+from markovlib.model import DiscreteChain, LinearGaussian, SemiMarkovChain, StateSpaceModel
 from markovlib.resolution import Intractable
 
 Float = npt.NDArray[np.float64]
@@ -62,3 +63,20 @@ def filter(model: LinearGaussian, observations: Float) -> FilterResult:
     engine = resolution.engine
     assert isinstance(engine, GaussianChain)
     return engine.filter(model, observations)
+
+
+def particle_filter(
+    model: StateSpaceModel,
+    observations: Float,
+    *,
+    n_particles: int,
+    seed: int,
+    resample_threshold: float = 0.5,
+) -> ParticleResult:
+    """Bootstrap particle filtering for a general state-space model (an *approximate* engine)."""
+    resolution = resolve_engine(model, "filter")
+    if isinstance(resolution, Intractable):
+        raise ValueError(resolution.reason)
+    engine = resolution.engine
+    assert isinstance(engine, ParticleFilter)
+    return engine.filter(model, observations, n_particles=n_particles, seed=seed, resample_threshold=resample_threshold)

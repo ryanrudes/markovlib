@@ -9,6 +9,7 @@ and forbids self-transitions.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -75,3 +76,23 @@ class LinearGaussian:
     obs_noise: Float
     init_mean: Float
     init_cov: Float
+
+
+@dataclass(frozen=True)
+class StateSpaceModel:
+    """A general (possibly nonlinear / non-Gaussian) state-space model, for particle filtering.
+
+    Three generative callables — all consuming a seeded ``numpy`` ``Generator``, so a filter over this
+    model is a deterministic function of its seed (the "reify the randomness as an explicit input" rule):
+
+    * ``sample_prior(rng, n) -> (n, D)`` — ``n`` draws from the initial state ``x_0``;
+    * ``propagate(rng, particles (n, D)) -> (n, D)`` — advance each particle one step through ``p(x_t | x_{t-1})``;
+    * ``log_likelihood(y (M,), particles (n, D)) -> (n,)`` — the per-particle ``log p(y_t | x_t)``.
+
+    The likelihood is evaluated *at the particle locations*, so it is not a fixed per-step factor — which
+    is exactly why the particle filter is a sibling engine, not an instance of the shared ``forward``.
+    """
+
+    sample_prior: Callable[[np.random.Generator, int], Float]
+    propagate: Callable[[np.random.Generator, Float], Float]
+    log_likelihood: Callable[[Float, Float], Float]
