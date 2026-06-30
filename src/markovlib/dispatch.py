@@ -2,27 +2,26 @@
 
 The deliberate analog of fungeom's decidable dispatch: given a model and a query, return *evidence*
 (:data:`~markovlib.resolution.EngineResolution`) naming the engine and its exactness, never a silent
-best-effort. The slice has one engine, so the table is short; the shape is what matters — new engines
-(segmental HSMM, Gaussian RTS, particle smoothing) register here, each declaring ``Exact`` or
-``Approximate`` for the queries they resolve.
+best-effort. A finite :class:`~markovlib.model.DiscreteChain` resolves every chain query exactly; a
+:class:`~markovlib.model.SemiMarkovChain` resolves ``decode`` exactly (its smoother is not built yet, so
+``smooth`` / ``loglik`` are honestly :class:`Intractable`). New engines register here, each declaring
+``Exact`` or ``Approximate`` for the queries they resolve.
 """
 
 from __future__ import annotations
 
 from markovlib.engines.exact_chain import ExactChain
-from markovlib.model import DiscreteChain
+from markovlib.engines.segmental import SegmentalChain
+from markovlib.model import DiscreteChain, SemiMarkovChain
 from markovlib.resolution import EngineResolution, Exact, Intractable
 
-_EXACT_QUERIES = frozenset({"filter", "smooth", "decode", "loglik"})
+_CHAIN_QUERIES = frozenset({"filter", "smooth", "decode", "loglik"})
 
 
 def resolve_engine(model: object, query: str) -> EngineResolution:
-    """Return evidence for which engine resolves ``query`` on ``model``, and whether exactly.
-
-    A finite :class:`~markovlib.model.DiscreteChain` resolves the chain queries **exactly** via
-    :class:`~markovlib.engines.exact_chain.ExactChain`; anything else is :class:`Intractable` (with a
-    reason) until an engine claims it.
-    """
-    if isinstance(model, DiscreteChain) and query in _EXACT_QUERIES:
+    """Return evidence for which engine resolves ``query`` on ``model``, and whether exactly."""
+    if isinstance(model, DiscreteChain) and query in _CHAIN_QUERIES:
         return Exact(ExactChain())
+    if isinstance(model, SemiMarkovChain) and query == "decode":
+        return Exact(SegmentalChain())
     return Intractable(f"no engine for {type(model).__name__} / query={query!r}")
