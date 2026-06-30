@@ -1,78 +1,152 @@
-"""``SegmentalChain`` — exact MAP decoding for a semi-Markov chain (explicit-duration Viterbi).
+"""``SegmentalChain`` — exact MAP decoding for a semi-Markov chain (right-censored explicit-duration Viterbi).
 
 The semi-Markov analog of :class:`~markovlib.engines.exact_chain.ExactChain`'s ``decode``: a dynamic
-program over *segments* rather than frames. ``δ[t, j]`` is the best score of a labelling of ``o[1..t]``
-whose final segment is state ``j`` ending exactly at ``t``; each segment contributes its dwell log-pmf,
-its summed emissions, and the between-state transition into it (self-transitions forbidden). Backpointers
-over ``(duration, predecessor)`` reconstruct the MAP segmentation. This is the piece a plain HMM cannot
-express — dwell is *modelled*, not left implicitly geometric.
+program over *segments* (maximal runs of one state) rather than frames. A segment of state ``s`` over
+frames ``[a, b]`` (length ``d``) scores ``Σ emit[a..b, s] + dwell_s(d) + log P(prev → s)``; the first
+segment uses ``log_init[s]``. Three refinements make this the **standard right-censored EDHMM**:
 
-Note: every segment (including the trailing one) is scored by the dwell pmf — i.e. full observation.
-Right-censoring the final segment by its survival function, and the duration-aware smoother
-(``hsmm_posteriors``), are deliberate next refinements.
+* the inter-segment transition is the off-diagonal of ``log_trans`` **renormalized** to a distribution
+  over the other states (self-transitions are forbidden — persistence is the dwell's job);
+* ``max_duration`` is a tractability cap, not a hard ceiling: a segment that runs the full cap is
+  **right-censored** (scored by ``log P(d ≥ cap)``, the survival) and may *continue in the same state*
+  at zero cost, so a genuine bout longer than the cap is represented exactly rather than truncated;
+* the DP therefore tracks two flavours per ``(t, s)`` — a naturally-ended segment (``d < cap``) and a
+  censored one (``d == cap``) — with per-flavour segment backpointers for the backtrace.
+
+This matches ``contact/hmm``'s `hsmm.py` decoder bit-for-bit (see ``verify_markovlib.py``).
 """
 
 from __future__ import annotations
 
 import numpy as np
 import numpy.typing as npt
+from scipy.special import logsumexp
 
+from markovlib.duration import DurationModel
 from markovlib.model import SemiMarkovChain
 
 Float = npt.NDArray[np.float64]
 Int = npt.NDArray[np.intp]
 
+_NEG = -1e30  # a finite stand-in for log 0 (matches the reference decoder's arithmetic exactly)
 
-def segmental_viterbi(
-    log_init: Float, log_trans: Float, dur_logpmf: Float, log_em: Float, max_duration: int
-) -> tuple[Int, float]:
-    """Explicit-duration Viterbi → ``(map_path, best_logscore)``.
 
-    ``dur_logpmf`` is ``(S, max_duration)`` with ``dur_logpmf[s, d-1] = log P(dwell_s = d)``. Raises if no
-    valid segmentation exists under the cap (e.g. a single-state chain longer than ``max_duration``).
+def inter_segment_logtrans(log_trans: Float) -> Float:
+    """The between-segment switch: zero the diagonal and renormalize each row over the other states.
+
+    An HSMM "transition" links two *naturally ended* segments, so it must change state; the result is a
+    proper distribution over ``s' ≠ s``. A single-state row (all ``-inf``) stays so (S=1 never switches).
+    """
+    switch = np.array(log_trans, dtype=np.float64)
+    np.fill_diagonal(switch, _NEG)
+    row = logsumexp(switch, axis=1)
+    safe = np.where(np.isfinite(row) & (row > _NEG / 2), row, 0.0)
+    return switch - safe[:, None]
+
+
+def duration_table(durations: tuple[DurationModel, ...], max_duration: int) -> Float:
+    """The censored dwell table ``(S, cap)``: pmf for ``d = 1..cap-1``, survival ``P(d ≥ cap)`` at ``d = cap``."""
+    table = np.empty((len(durations), max_duration), dtype=np.float64)
+    for s, dur in enumerate(durations):
+        for d in range(1, max_duration):
+            table[s, d - 1] = dur.log_pmf(d)
+        table[s, max_duration - 1] = dur.log_survival(max_duration)
+    return table
+
+
+def segmental_viterbi(log_init: Float, switch: Float, log_dur: Float, log_em: Float, max_duration: int) -> Int:
+    """Right-censored explicit-duration Viterbi → the MAP state path ``(T,)``.
+
+    ``switch`` is the renormalized inter-segment transition (see :func:`inter_segment_logtrans`);
+    ``log_dur`` is the censored dwell table (see :func:`duration_table`).
     """
     n_steps, n_states = log_em.shape
-    cum = np.vstack([np.zeros((1, n_states)), np.cumsum(log_em, axis=0)])  # cum[t] = Σ_{τ≤t} log_em[τ]
-    delta = np.full((n_steps + 1, n_states), -np.inf)
-    bp_dur = np.zeros((n_steps + 1, n_states), dtype=np.intp)
-    bp_prev = np.full((n_steps + 1, n_states), -1, dtype=np.intp)
+    cap = max_duration
+    prefix = np.zeros((n_steps + 1, n_states), dtype=np.float64)
+    np.cumsum(log_em, axis=0, out=prefix[1:])
+
+    # Two flavours of "a segment of state s ends at frame t-1": natural (d < cap) and censored (d == cap).
+    v_end = np.full((n_steps + 1, n_states), _NEG, dtype=np.float64)
+    v_cens = np.full((n_steps + 1, n_states), _NEG, dtype=np.float64)
+    bd_end = np.zeros((n_steps + 1, n_states), dtype=np.intp)
+    bp_end = np.full((n_steps + 1, n_states), -1, dtype=np.intp)
+    bf_end = np.zeros((n_steps + 1, n_states), dtype=np.intp)
+    bd_cens = np.zeros((n_steps + 1, n_states), dtype=np.intp)
+    bp_cens = np.full((n_steps + 1, n_states), -1, dtype=np.intp)
+    bf_cens = np.zeros((n_steps + 1, n_states), dtype=np.intp)
+    states = np.arange(n_states)
+
     for t in range(1, n_steps + 1):
-        for j in range(n_states):
-            for d in range(1, min(max_duration, t) + 1):
-                start = t - d
-                segment = cum[t, j] - cum[start, j] + dur_logpmf[j, d - 1]
-                if start == 0:
-                    cand, prev = log_init[j] + segment, np.intp(-1)
-                else:
-                    scores = delta[start] + log_trans[:, j]
-                    scores[j] = -np.inf  # no self-transition between adjacent segments
-                    prev = np.intp(np.argmax(scores))
-                    cand = scores[prev] + segment
-                if cand > delta[t, j]:
-                    delta[t, j] = cand
-                    bp_dur[t, j] = d
-                    bp_prev[t, j] = prev
-    last = int(np.argmax(delta[n_steps]))
-    if not np.isfinite(delta[n_steps, last]):
-        raise ValueError("no valid segmentation under the duration cap")
+        d_max = min(t, cap)
+        seg_emit = prefix[t][None, :] - prefix[t - d_max : t][::-1, :]  # (d_max, S): emission mass of each segment
+        dur_term = log_dur[:, :d_max].T  # (d_max, S)
+
+        best_prev = np.maximum(v_end, v_cens)
+        tot_prev = best_prev[t - d_max : t][::-1, :]  # (d_max, S')
+        cens_prev = v_cens[t - d_max : t][::-1, :]  # (d_max, S) same-state continuation
+
+        trans_score = tot_prev[:, :, None] + switch[None, :, :]  # (d_max, S', S)
+        switch_in = np.max(trans_score, axis=1)  # (d_max, S)
+        switch_idx = np.argmax(trans_score, axis=1)  # (d_max, S) -> predecessor state
+        cont_in = cens_prev  # (d_max, S)
+        entry = np.maximum(switch_in, cont_in)
+
+        if d_max == t:  # the first segment of the record may start here
+            entry = entry.copy()
+            start_vals = np.maximum(log_init, entry[t - 1])
+            entry[t - 1] = start_vals
+
+        cand = entry + seg_emit + dur_term  # (d_max, S)
+
+        use_cont = cont_in >= switch_in
+        idx = np.arange(d_max)[:, None]
+        t_pred = t - (idx + 1)
+        src_end = v_end[t_pred, switch_idx]
+        src_cens = v_cens[t_pred, switch_idx]
+        switch_pflav = (src_cens > src_end).astype(np.intp)
+        pstate = np.where(use_cont, states[None, :], switch_idx)
+        pflav = np.where(use_cont, 1, switch_pflav)
+        if d_max == t:
+            is_start = start_vals >= np.maximum(switch_in[t - 1], cont_in[t - 1])
+            pstate[t - 1] = np.where(is_start, -1, pstate[t - 1])
+            pflav[t - 1] = np.where(is_start, 0, pflav[t - 1])
+
+        is_cap = d_max == cap
+        natural = cand[: cap - 1] if is_cap else cand
+        if natural.shape[0] > 0:
+            best = np.argmax(natural, axis=0)
+            v_end[t] = natural[best, states]
+            bd_end[t] = best + 1
+            bp_end[t] = pstate[best, states]
+            bf_end[t] = pflav[best, states]
+        if is_cap:
+            v_cens[t] = cand[cap - 1]
+            bd_cens[t] = cap
+            bp_cens[t] = pstate[cap - 1]
+            bf_cens[t] = pflav[cap - 1]
+
+    state = int(np.argmax(np.maximum(v_end[n_steps], v_cens[n_steps])))
+    flavour = 1 if v_cens[n_steps, state] > v_end[n_steps, state] else 0
     path = np.empty(n_steps, dtype=np.intp)
-    t, j = n_steps, last
+    t = n_steps
     while t > 0:
-        d = int(bp_dur[t, j])
-        path[t - d : t] = j
-        j = int(bp_prev[t, j])
+        bd, bp, bf = (bd_cens, bp_cens, bf_cens) if flavour == 1 else (bd_end, bp_end, bf_end)
+        d = int(bd[t, state])
+        prev_state = int(bp[t, state])
+        prev_flavour = int(bf[t, state])
+        path[t - d : t] = state
         t -= d
-    return path, float(delta[n_steps, last])
+        if prev_state < 0:
+            break
+        state, flavour = prev_state, prev_flavour
+    return path
 
 
 class SegmentalChain:
-    """Exact MAP decoding for a :class:`~markovlib.model.SemiMarkovChain`."""
+    """Exact right-censored EDHMM MAP decoding for a :class:`~markovlib.model.SemiMarkovChain`."""
 
     def decode(self, model: SemiMarkovChain, log_emissions: Float) -> Int:
-        """The most likely state path under the explicit-duration model (segmental Viterbi)."""
-        cap = model.max_duration
-        dur_logpmf = np.array(
-            [[model.durations[s].log_pmf(d) for d in range(1, cap + 1)] for s in range(model.n_states)]
-        )
-        path, _ = segmental_viterbi(model.log_init, model.log_trans, dur_logpmf, log_emissions, cap)
-        return path
+        """The most likely state path under the explicit-duration model."""
+        switch = inter_segment_logtrans(model.log_trans)
+        log_dur = duration_table(model.durations, model.max_duration)
+        return segmental_viterbi(model.log_init, switch, log_dur, log_emissions, model.max_duration)
