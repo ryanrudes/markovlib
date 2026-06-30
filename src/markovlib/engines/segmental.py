@@ -23,6 +23,7 @@ import numpy.typing as npt
 from scipy.special import logsumexp
 
 from markovlib.duration import DurationModel
+from markovlib.engines.exact_chain import SmoothResult
 from markovlib.model import SemiMarkovChain
 
 Float = npt.NDArray[np.float64]
@@ -142,11 +143,99 @@ def segmental_viterbi(log_init: Float, switch: Float, log_dur: Float, log_em: Fl
     return path
 
 
+def segmental_posteriors(
+    log_init: Float, switch: Float, log_dur: Float, log_em: Float, max_duration: int
+) -> tuple[Float, float]:
+    """Right-censored explicit-duration forward–backward → ``(per-frame posteriors (T, S), loglik)``.
+
+    The sum-product analog of :func:`segmental_viterbi`: the two-flavour (natural-end / censored)
+    forward and backward passes, then each segment scatters its (normalized) probability uniformly
+    across the frames it covers. Same censoring semantics (survival mass at ``d == cap``, same-state
+    continuation across a censored boundary). ``switch`` and ``log_dur`` are as for the decoder.
+    """
+    n_steps, n_states = log_em.shape
+    cap = max_duration
+    prefix = np.zeros((n_steps + 1, n_states), dtype=np.float64)
+    np.cumsum(log_em, axis=0, out=prefix[1:])
+
+    # --- Forward: alpha_star (a segment of s begins at t), alpha_end (natural end), alpha_cens (censored end).
+    alpha_star = np.full((n_steps + 1, n_states), _NEG, dtype=np.float64)
+    alpha_end = np.full((n_steps + 1, n_states), _NEG, dtype=np.float64)
+    alpha_cens = np.full((n_steps + 1, n_states), _NEG, dtype=np.float64)
+    alpha_star[0] = log_init
+    for t in range(1, n_steps + 1):
+        natural = min(t, cap - 1)
+        if natural >= 1:
+            seg = prefix[t][None, :] - prefix[t - natural : t][::-1, :]
+            alpha_end[t] = logsumexp(alpha_star[t - natural : t][::-1, :] + log_dur[:, :natural].T + seg, axis=0)
+        if t >= cap:
+            alpha_cens[t] = alpha_star[t - cap] + log_dur[:, cap - 1] + (prefix[t] - prefix[t - cap])
+        if t < n_steps:
+            tot_end = np.logaddexp(alpha_end[t], alpha_cens[t])
+            switched = logsumexp(tot_end[:, None] + switch, axis=0)
+            alpha_star[t] = np.logaddexp(switched, alpha_cens[t])
+    loglik = float(logsumexp(np.logaddexp(alpha_end[n_steps], alpha_cens[n_steps])))
+
+    # --- Backward: beta[t, s] = log p(o_t.. | a segment of s begins at t). cont_* are the post-end values.
+    beta = np.full((n_steps + 1, n_states), _NEG, dtype=np.float64)
+
+    def cont_nat(u: int) -> Float:  # value following a *natural* end at u (a switch to another state)
+        if u == n_steps:
+            return np.zeros(n_states, dtype=np.float64)
+        following: Float = logsumexp(switch + beta[u][None, :], axis=1)
+        return following
+
+    def cont_cens(u: int) -> Float:  # following a *censored* end at u (switch OR same-state continue)
+        if u == n_steps:
+            return np.zeros(n_states, dtype=np.float64)
+        following: Float = np.logaddexp(logsumexp(switch + beta[u][None, :], axis=1), beta[u])
+        return following
+
+    for t in range(n_steps - 1, -1, -1):
+        terms = []
+        natural = min(n_steps - t, cap - 1)
+        if natural >= 1:
+            seg = prefix[t + 1 : t + natural + 1, :] - prefix[t][None, :]
+            cont = np.stack([cont_nat(t + d) for d in range(1, natural + 1)], axis=0)
+            terms.append(logsumexp(log_dur[:, :natural].T + seg + cont, axis=0))
+        if n_steps - t >= cap:
+            seg = prefix[t + cap, :] - prefix[t, :]
+            terms.append(log_dur[:, cap - 1] + seg + cont_cens(t + cap))
+        if terms:
+            beta[t] = logsumexp(np.stack(terms, axis=0), axis=0)
+
+    # --- Per-frame occupancy: each segment scatters its (normalized) probability across its frames.
+    cont_nat_tab = np.stack([cont_nat(u) for u in range(n_steps + 1)], axis=0)
+    cont_cens_tab = np.stack([cont_cens(u) for u in range(n_steps + 1)], axis=0)
+    gamma = np.zeros((n_steps, n_states), dtype=np.float64)
+    for s in range(n_states):
+        for start in range(n_steps):
+            d_max = min(n_steps - start, cap)
+            seg_emit = prefix[start + 1 : start + d_max + 1, s] - prefix[start, s]
+            dwell = log_dur[s, :d_max].copy()
+            cont = cont_nat_tab[start + 1 : start + d_max + 1, s].copy()
+            if d_max == cap:
+                cont[cap - 1] = cont_cens_tab[start + cap, s]
+            seg_logp = alpha_star[start, s] + dwell + seg_emit + cont - loglik
+            seg_p = np.exp(np.minimum(seg_logp, 0.0))
+            gamma[start : start + d_max, s] += np.cumsum(seg_p[::-1])[::-1]  # suffix scatter
+    row = gamma.sum(axis=1, keepdims=True)
+    gamma = gamma / np.where(row > 0.0, row, 1.0)
+    return gamma, loglik
+
+
 class SegmentalChain:
-    """Exact right-censored EDHMM MAP decoding for a :class:`~markovlib.model.SemiMarkovChain`."""
+    """Exact right-censored EDHMM decoding (MAP path) and smoothing (per-frame posteriors)."""
 
     def decode(self, model: SemiMarkovChain, log_emissions: Float) -> Int:
         """The most likely state path under the explicit-duration model."""
         switch = inter_segment_logtrans(model.log_trans)
         log_dur = duration_table(model.durations, model.max_duration)
         return segmental_viterbi(model.log_init, switch, log_dur, log_emissions, model.max_duration)
+
+    def smooth(self, model: SemiMarkovChain, log_emissions: Float) -> SmoothResult:
+        """Per-frame posteriors + log-likelihood under the explicit-duration model (segmental FB)."""
+        switch = inter_segment_logtrans(model.log_trans)
+        log_dur = duration_table(model.durations, model.max_duration)
+        gamma, loglik = segmental_posteriors(model.log_init, switch, log_dur, log_emissions, model.max_duration)
+        return SmoothResult(gamma=gamma, loglik=loglik)

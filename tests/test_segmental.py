@@ -13,6 +13,7 @@ import math
 
 import numpy as np
 import pytest
+from scipy.special import logsumexp
 
 import markovlib as mk
 from markovlib.duration import NegBinomDuration
@@ -74,6 +75,59 @@ def test_segmental_viterbi_matches_brute_force_with_censoring():
         assert np.array_equal(mk.decode(model, log_em), ref_path)
 
 
+def _brute_force_edhmm_posteriors(model: mk.SemiMarkovChain, log_em):
+    """Per-frame posteriors by enumerating all valid segmentations (the sum-product oracle)."""
+    switch = inter_segment_logtrans(model.log_trans)
+    n_steps, n_states = log_em.shape
+    cap = model.max_duration
+    cum = np.vstack([np.zeros(n_states), np.cumsum(log_em, axis=0)])
+    enumerated: list[tuple[float, list[int]]] = []
+
+    def dwell(state: int, d: int) -> float:
+        return model.durations[state].log_survival(cap) if d == cap else model.durations[state].log_pmf(d)
+
+    def recurse(start, prev_state, prev_censored, score, frames):
+        if start == n_steps:
+            enumerated.append((score, frames))
+            return
+        for d in range(1, min(cap, n_steps - start) + 1):
+            seg = cum[start + d] - cum[start]
+            for s in range(n_states):
+                if prev_state is None:
+                    entry = float(model.log_init[s])
+                elif s == prev_state:
+                    if not prev_censored:
+                        continue
+                    entry = 0.0
+                else:
+                    entry = float(switch[prev_state, s])
+                recurse(start + d, s, d == cap, score + entry + dwell(s, d) + float(seg[s]), [*frames, *([s] * d)])
+
+    recurse(0, None, False, 0.0, [])
+    scores = np.array([score for score, _ in enumerated])
+    loglik = float(logsumexp(scores))
+    weights = np.exp(scores - loglik)
+    gamma = np.zeros((n_steps, n_states))
+    for (_, frames), weight in zip(enumerated, weights, strict=True):
+        for t in range(n_steps):
+            gamma[t, frames[t]] += weight
+    return gamma, loglik
+
+
+def test_segmental_smooth_matches_brute_force_posteriors():
+    rng = np.random.default_rng(11)
+    for _ in range(20):
+        n_states = int(rng.integers(2, 4))
+        n_steps = int(rng.integers(2, 7))
+        model = _random_hsmm(rng, n_states, int(rng.integers(2, 4)))
+        log_em = np.log(rng.uniform(0.05, 1.0, size=(n_steps, n_states)))
+        result = mk.smooth(model, log_em)
+        gamma_ref, loglik_ref = _brute_force_edhmm_posteriors(model, log_em)
+        assert np.allclose(result.gamma, gamma_ref, atol=1e-9)
+        assert np.isclose(result.loglik, loglik_ref, atol=1e-9)
+        assert np.allclose(result.gamma.sum(axis=1), 1.0)
+
+
 def test_single_state_persists_via_censoring():
     # S=1 cannot switch, but censored continuation lets the lone state span the whole record.
     durations = (NegBinomDuration(mean=2.0, concentration=1.0),)
@@ -122,11 +176,12 @@ def test_negbinom_validates_its_parameters():
         NegBinomDuration(mean=2.0, concentration=1.0).log_pmf(0)
 
 
-def test_resolve_engine_hsmm_decode_exact_smooth_intractable():
+def test_resolve_engine_hsmm_decode_and_smooth_exact():
     model = _random_hsmm(np.random.default_rng(1), 2, 3)
     assert model.n_states == 2
     assert isinstance(mk.resolve_engine(model, "decode"), mk.Exact)
-    assert isinstance(mk.resolve_engine(model, "smooth"), mk.Intractable)
+    assert isinstance(mk.resolve_engine(model, "smooth"), mk.Exact)
+    assert isinstance(mk.resolve_engine(model, "loglik"), mk.Intractable)  # HSMM loglik not implemented
 
 
 def test_decode_raises_on_unsupported_model():

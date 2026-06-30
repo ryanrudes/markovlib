@@ -3,8 +3,8 @@
 Each is the same two steps — :func:`~markovlib.dispatch.resolve_engine` to decide *which* engine
 resolves the query, then run it — so the caller's interface is independent of the resolved engine. An
 :class:`~markovlib.resolution.Intractable` resolution is raised, never silently swallowed. ``decode``
-spans both chain kinds (HMM via :class:`ExactChain`, HSMM via :class:`SegmentalChain`); ``smooth`` /
-``loglik`` are exact only for the plain :class:`~markovlib.model.DiscreteChain` today.
+spans both chain kinds (HMM, HSMM); ``smooth`` spans HMM / HSMM / linear-Gaussian (RTS); ``loglik`` is
+the plain :class:`~markovlib.model.DiscreteChain` today.
 """
 
 from __future__ import annotations
@@ -37,15 +37,20 @@ def _exact_chain(model: DiscreteChain, query: str) -> ExactChain:
 @overload
 def smooth(model: DiscreteChain, data: Float) -> SmoothResult: ...
 @overload
+def smooth(model: SemiMarkovChain, data: Float) -> SmoothResult: ...
+@overload
 def smooth(model: LinearGaussian, data: Float) -> GaussianSmoothResult: ...
-def smooth(model: DiscreteChain | LinearGaussian, data: Float) -> SmoothResult | GaussianSmoothResult:
-    """Posterior smoothing — forward–backward marginals (HMM) or RTS estimates (linear-Gaussian)."""
+def smooth(model: DiscreteChain | SemiMarkovChain | LinearGaussian, data: Float) -> SmoothResult | GaussianSmoothResult:
+    """Posterior smoothing — forward–backward marginals (HMM / HSMM) or RTS estimates (linear-Gaussian)."""
     resolution = resolve_engine(model, "smooth")
     if isinstance(resolution, Intractable):
         raise ValueError(resolution.reason)
     engine = resolution.engine
     if isinstance(engine, ExactChain):
         assert isinstance(model, DiscreteChain)
+        return engine.smooth(model, data)
+    if isinstance(engine, SegmentalChain):
+        assert isinstance(model, SemiMarkovChain)
         return engine.smooth(model, data)
     assert isinstance(engine, GaussianChain) and isinstance(model, LinearGaussian)
     return engine.smooth(model, data)

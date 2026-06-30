@@ -24,7 +24,7 @@ def resolve_engine(model: object, query: str) -> EngineResolution:
     """Return evidence for which engine resolves ``query`` on ``model``, and whether exactly."""
     if isinstance(model, DiscreteChain) and query in _CHAIN_QUERIES:
         return Exact(ExactChain())
-    if isinstance(model, SemiMarkovChain) and query == "decode":
+    if isinstance(model, SemiMarkovChain) and query in {"decode", "smooth"}:
         return Exact(SegmentalChain())
     if isinstance(model, LinearGaussian) and query in {"filter", "smooth"}:
         return Exact(GaussianChain())
