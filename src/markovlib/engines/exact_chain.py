@@ -1,9 +1,10 @@
 """``ExactChain`` — exact inference for a finite discrete chain.
 
-The reference engine: for a finite-state chain every query (filter / smooth / decode / loglik) is
-*exact*, computed by the belief-generic forward recursion plus the categorical second passes in
-:mod:`markovlib.engines.recursion`. Being exact, it is also the **reference** future fast/approximate
-engines are tested against (validated here against brute-force path enumeration in the tests).
+The reference engine: for a finite-state chain every query (filter / smooth / decode / loglik) and the
+EM E-step (:meth:`ExactChain.expected_stats`) are *exact*, computed by the belief-generic forward
+recursion plus the categorical second passes in :mod:`markovlib.engines.recursion`. Being exact, it is
+also the **reference** future fast/approximate engines are tested against (validated against brute-force
+path enumeration in the tests).
 """
 
 from __future__ import annotations
@@ -30,8 +31,22 @@ class SmoothResult:
     loglik: float
 
 
+@dataclass(frozen=True)
+class ExpectedStats:
+    """The EM E-step's expected sufficient statistics.
+
+    ``gamma`` ``(T, S)`` are the state marginals ``P(state_t = s | obs)``; ``xi`` ``(T-1, S, S)`` are the
+    pairwise marginals ``P(state_t = i, state_{t+1} = j | obs)`` — together they are everything the
+    initial/transition M-step needs. ``loglik`` is the observed-data log-likelihood at these parameters.
+    """
+
+    gamma: Float
+    xi: Float
+    loglik: float
+
+
 class ExactChain:
-    """Exact filter / smooth / decode / loglik for a :class:`~markovlib.model.DiscreteChain`."""
+    """Exact filter / smooth / decode / loglik + EM E-step for a :class:`~markovlib.model.DiscreteChain`."""
 
     def _forward(self, model: DiscreteChain, log_emissions: Float) -> list[Categorical]:
         """The sum-product forward beliefs ``α`` — the belief-generic recursion at categorical instance."""
@@ -39,19 +54,42 @@ class ExactChain:
         predict = categorical_predict(model.log_trans, SumProduct())
         return forward(Categorical(model.log_init), predict, factors)
 
+    def _alpha_beta(self, model: DiscreteChain, log_emissions: Float) -> tuple[Float, Float, float]:
+        """The log forward ``α``, the log backward ``β``, and the data log-likelihood."""
+        alpha = self._forward(model, log_emissions)
+        log_alpha = np.stack([belief.log_p for belief in alpha])
+        beta = backward_messages(model.log_trans, log_emissions)
+        loglik = float(logsumexp(log_alpha[-1]))
+        return log_alpha, beta, loglik
+
+    @staticmethod
+    def _gamma(log_alpha: Float, beta: Float) -> Float:
+        """Posterior state marginals ``γ[t] = normalize(α[t] + β[t])``."""
+        unnorm = log_alpha + beta
+        gamma: Float = np.exp(unnorm - logsumexp(unnorm, axis=1, keepdims=True))
+        return gamma
+
     def smooth(self, model: DiscreteChain, log_emissions: Float) -> SmoothResult:
         """Forward–backward: posterior marginals + log-likelihood (sum-product)."""
-        alpha = self._forward(model, log_emissions)
-        beta = backward_messages(model.log_trans, log_emissions)
-        loglik = alpha[-1].log_mass()
-        log_alpha = np.stack([belief.log_p for belief in alpha])
-        unnorm = log_alpha + beta
-        gamma = np.exp(unnorm - logsumexp(unnorm, axis=1, keepdims=True))
-        return SmoothResult(gamma=gamma, loglik=loglik)
+        log_alpha, beta, loglik = self._alpha_beta(model, log_emissions)
+        return SmoothResult(gamma=self._gamma(log_alpha, beta), loglik=loglik)
 
     def loglik(self, model: DiscreteChain, log_emissions: Float) -> float:
         """The data log-likelihood ``log p(observations)`` (forward pass only)."""
         return self._forward(model, log_emissions)[-1].log_mass()
+
+    def expected_stats(self, model: DiscreteChain, log_emissions: Float) -> ExpectedStats:
+        """The EM E-step: state marginals ``γ``, pairwise marginals ``ξ``, and the log-likelihood.
+
+        ``ξ[t, i, j] = normalize( α[t, i] + log A[i, j] + log b_{t+1}(j) + β[t+1, j] )`` (normalized by the
+        log-likelihood). It marginalizes to ``γ`` (``Σ_j ξ[t, i, j] = γ[t, i]``) and sums to 1 per ``t``.
+        """
+        log_alpha, beta, loglik = self._alpha_beta(model, log_emissions)
+        gamma = self._gamma(log_alpha, beta)
+        log_xi = (
+            log_alpha[:-1, :, None] + model.log_trans[None, :, :] + (log_emissions[1:] + beta[1:])[:, None, :] - loglik
+        )
+        return ExpectedStats(gamma=gamma, xi=np.exp(log_xi), loglik=loglik)
 
     def decode(self, model: DiscreteChain, log_emissions: Float) -> npt.NDArray[np.intp]:
         """The single most likely state path (Viterbi / MAP, max-plus)."""
