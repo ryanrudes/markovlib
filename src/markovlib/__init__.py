@@ -12,7 +12,7 @@ from markovlib.belief import Belief, Categorical, GaussianBelief
 from markovlib.dispatch import resolve_engine
 from markovlib.duration import DurationModel, NegBinomDuration
 from markovlib.engines.exact_chain import ExactChain, ExpectedStats, SmoothResult
-from markovlib.engines.gaussian import FilterResult, GaussianChain
+from markovlib.engines.gaussian import FilterResult, GaussianChain, GaussianSmoothResult
 from markovlib.engines.particle import ParticleFilter, ParticleResult
 from markovlib.engines.segmental import SegmentalChain
 from markovlib.learn import FitResult, fit
@@ -38,6 +38,7 @@ __all__ = [
     "SmoothResult",
     "ExpectedStats",
     "FilterResult",
+    "GaussianSmoothResult",
     "ParticleResult",
     "FitResult",
     "fit",

@@ -68,6 +68,49 @@ def test_kalman_filter_matches_textbook():
         assert np.isclose(result.loglik, loglik, atol=1e-7)
 
 
+def _textbook_rts(model: mk.LinearGaussian, observations: np.ndarray):
+    """The standard moment-form Kalman filter + RTS backward pass — the independent smoother oracle."""
+    A, Q, H, R = model.transition, model.process_noise, model.observation, model.obs_noise
+    mean, cov = model.init_mean.copy(), model.init_cov.copy()
+    filt_m, filt_c, pred_m, pred_c = [], [], [], []
+    for t, y in enumerate(observations):
+        if t > 0:
+            mean = A @ mean
+            cov = A @ cov @ A.T + Q
+        pred_m.append(mean)
+        pred_c.append(cov)
+        innovation_cov = H @ cov @ H.T + R
+        gain = cov @ H.T @ np.linalg.inv(innovation_cov)
+        mean = mean + gain @ (y - H @ mean)
+        cov = cov - gain @ H @ cov
+        filt_m.append(mean)
+        filt_c.append(cov)
+    n = len(observations)
+    sm_m, sm_c = list(filt_m), list(filt_c)
+    for t in range(n - 2, -1, -1):
+        smoother_gain = filt_c[t] @ A.T @ np.linalg.inv(pred_c[t + 1])
+        sm_m[t] = filt_m[t] + smoother_gain @ (sm_m[t + 1] - pred_m[t + 1])
+        sm_c[t] = filt_c[t] + smoother_gain @ (sm_c[t + 1] - pred_c[t + 1]) @ smoother_gain.T
+    return np.array(sm_m), np.array(sm_c)
+
+
+def test_kalman_smoother_matches_textbook_rts():
+    rng = np.random.default_rng(2)
+    for _ in range(30):
+        dim_state = int(rng.integers(1, 4))
+        dim_obs = int(rng.integers(1, 3))
+        n_steps = int(rng.integers(2, 15))
+        model = _random_model(rng, dim_state, dim_obs)
+        observations = rng.normal(size=(n_steps, dim_obs))
+
+        result = mk.smooth(model, observations)
+        means, covs = _textbook_rts(model, observations)
+
+        assert np.allclose(result.means, means, atol=1e-7)
+        assert np.allclose(result.covariances, covs, atol=1e-7)
+        assert np.isclose(result.loglik, mk.filter(model, observations).loglik, atol=1e-9)
+
+
 def test_gaussian_belief_combine_adds_canonical_form():
     a = mk.GaussianBelief(np.array([1.0, 2.0]), np.eye(2), 0.5)
     b = mk.GaussianBelief(np.array([0.0, 1.0]), 2.0 * np.eye(2), 1.5)

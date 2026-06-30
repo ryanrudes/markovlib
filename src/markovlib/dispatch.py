@@ -26,7 +26,7 @@ def resolve_engine(model: object, query: str) -> EngineResolution:
         return Exact(ExactChain())
     if isinstance(model, SemiMarkovChain) and query == "decode":
         return Exact(SegmentalChain())
-    if isinstance(model, LinearGaussian) and query == "filter":
+    if isinstance(model, LinearGaussian) and query in {"filter", "smooth"}:
         return Exact(GaussianChain())
     if isinstance(model, StateSpaceModel) and query == "filter":
         return Approximate(ParticleFilter(), "bootstrap particle filter", "O(1/sqrt(N)) Monte Carlo")

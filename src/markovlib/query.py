@@ -9,12 +9,14 @@ spans both chain kinds (HMM via :class:`ExactChain`, HSMM via :class:`SegmentalC
 
 from __future__ import annotations
 
+from typing import overload
+
 import numpy as np
 import numpy.typing as npt
 
 from markovlib.dispatch import resolve_engine
 from markovlib.engines.exact_chain import ExactChain, SmoothResult
-from markovlib.engines.gaussian import FilterResult, GaussianChain
+from markovlib.engines.gaussian import FilterResult, GaussianChain, GaussianSmoothResult
 from markovlib.engines.particle import ParticleFilter, ParticleResult
 from markovlib.engines.segmental import SegmentalChain
 from markovlib.model import DiscreteChain, LinearGaussian, SemiMarkovChain, StateSpaceModel
@@ -32,9 +34,21 @@ def _exact_chain(model: DiscreteChain, query: str) -> ExactChain:
     return engine
 
 
-def smooth(model: DiscreteChain, log_emissions: Float) -> SmoothResult:
-    """Posterior marginals + log-likelihood (forward–backward)."""
-    return _exact_chain(model, "smooth").smooth(model, log_emissions)
+@overload
+def smooth(model: DiscreteChain, data: Float) -> SmoothResult: ...
+@overload
+def smooth(model: LinearGaussian, data: Float) -> GaussianSmoothResult: ...
+def smooth(model: DiscreteChain | LinearGaussian, data: Float) -> SmoothResult | GaussianSmoothResult:
+    """Posterior smoothing — forward–backward marginals (HMM) or RTS estimates (linear-Gaussian)."""
+    resolution = resolve_engine(model, "smooth")
+    if isinstance(resolution, Intractable):
+        raise ValueError(resolution.reason)
+    engine = resolution.engine
+    if isinstance(engine, ExactChain):
+        assert isinstance(model, DiscreteChain)
+        return engine.smooth(model, data)
+    assert isinstance(engine, GaussianChain) and isinstance(model, LinearGaussian)
+    return engine.smooth(model, data)
 
 
 def loglik(model: DiscreteChain, log_emissions: Float) -> float:

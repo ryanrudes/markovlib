@@ -130,6 +130,8 @@ def test_n_states_reports_state_count():
 def test_query_raises_on_intractable_model():
     with pytest.raises(ValueError, match="no engine"):
         mk.smooth(object(), np.zeros((2, 2)))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="no engine"):
+        mk.loglik(object(), np.zeros((2, 2)))  # type: ignore[arg-type]
 
 
 def _random_inhomogeneous(rng: np.random.Generator, n_states: int, n_steps: int):

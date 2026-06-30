@@ -37,6 +37,15 @@ class FilterResult:
     loglik: float
 
 
+@dataclass(frozen=True)
+class GaussianSmoothResult:
+    """RTS-smoothed estimates ``p(x_t | y_{0:T-1})``: per-step ``means``, ``covariances``, and the data loglik."""
+
+    means: Float
+    covariances: Float
+    loglik: float
+
+
 def _observation_factor(model: LinearGaussian, y: Float) -> GaussianBelief:
     """The likelihood ``N(y | H x, R)`` as a canonical potential in ``x`` (a fixed per-step factor)."""
     obs_precision = np.linalg.inv(model.obs_noise)
@@ -72,14 +81,34 @@ def gaussian_predict(transition: Float, process_noise: Float) -> Callable[[Gauss
 
 
 class GaussianChain:
-    """Exact Kalman filtering for a :class:`~markovlib.model.LinearGaussian` model."""
+    """Exact Kalman filtering and RTS smoothing for a :class:`~markovlib.model.LinearGaussian` model."""
 
-    def filter(self, model: LinearGaussian, observations: Float) -> FilterResult:
-        """The filtered ``p(x_t | y_{0:t})`` mean/covariance per step + the data log-likelihood."""
+    def _filtered_beliefs(self, model: LinearGaussian, observations: Float) -> list[GaussianBelief]:
+        """The filtered messages — the shared forward recursion with a Gaussian belief."""
         prior = _prior_factor(model)
         factors = [_observation_factor(model, y) for y in observations]
         predict = gaussian_predict(model.transition, model.process_noise)
-        beliefs = forward(prior, predict, factors)
+        return forward(prior, predict, factors)
+
+    def filter(self, model: LinearGaussian, observations: Float) -> FilterResult:
+        """The filtered ``p(x_t | y_{0:t})`` mean/covariance per step + the data log-likelihood."""
+        beliefs = self._filtered_beliefs(model, observations)
         means = np.stack([belief.mean() for belief in beliefs])
         covariances = np.stack([belief.covariance() for belief in beliefs])
         return FilterResult(means=means, covariances=covariances, loglik=beliefs[-1].log_mass())
+
+    def smooth(self, model: LinearGaussian, observations: Float) -> GaussianSmoothResult:
+        """The RTS-smoothed ``p(x_t | y_{0:T-1})`` mean/covariance per step (filter forward + RTS backward)."""
+        beliefs = self._filtered_beliefs(model, observations)
+        filtered_means = [belief.mean() for belief in beliefs]
+        filtered_covs = [belief.covariance() for belief in beliefs]
+        transition, process_noise = model.transition, model.process_noise
+        smoothed_means = list(filtered_means)  # the last step is already smoothed (= filtered)
+        smoothed_covs = list(filtered_covs)
+        for t in range(len(beliefs) - 2, -1, -1):
+            predicted_mean = transition @ filtered_means[t]
+            predicted_cov = transition @ filtered_covs[t] @ transition.T + process_noise
+            gain = filtered_covs[t] @ transition.T @ np.linalg.inv(predicted_cov)
+            smoothed_means[t] = filtered_means[t] + gain @ (smoothed_means[t + 1] - predicted_mean)
+            smoothed_covs[t] = filtered_covs[t] + gain @ (smoothed_covs[t + 1] - predicted_cov) @ gain.T
+        return GaussianSmoothResult(np.stack(smoothed_means), np.stack(smoothed_covs), beliefs[-1].log_mass())
