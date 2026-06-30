@@ -22,6 +22,9 @@ line-length = 120
 [tool.mypy]
 strict = true
 files = ["src"]
+# markovlib.fungeom is an optional Python-3.13 bridge that imports fungeom; it is excluded from the
+# 3.12 core gate (typed + tested separately in a 3.13 env — see examples/verify_fungeom_bridge.py).
+exclude = ["src/markovlib/fungeom.py"]
 
 [[tool.mypy.overrides]]
 module = ["scipy.*"]
@@ -30,3 +33,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.run]
+omit = ["src/markovlib/fungeom.py"]  # the optional 3.13 bridge — verified separately, not in the 3.12 gate
