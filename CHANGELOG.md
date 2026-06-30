@@ -7,7 +7,7 @@ All notable changes to **marmo** (the `markovlib` inference library) are documen
 
 ## [Unreleased]
 
-## [0.1.0]
+## [0.1.0] - 2026-06-30
 
 The initial release: the full Markov-like-process inference family behind a decidable engine dispatch.
 
@@ -38,3 +38,6 @@ The initial release: the full Markov-like-process inference family behind a deci
 
 Every engine is validated against an independent oracle (brute-force enumeration or a textbook
 reference) under `mypy --strict` and a 100% coverage gate.
+
+[Unreleased]: https://github.com/ryanrudes/markovlib/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ryanrudes/markovlib/releases/tag/v0.1.0
