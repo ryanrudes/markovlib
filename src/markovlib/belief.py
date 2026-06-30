@@ -63,3 +63,47 @@ class Categorical:
     def mode(self) -> int:
         """The most probable state index (MAP marginal)."""
         return int(np.argmax(self.log_p))
+
+
+@dataclass(frozen=True)
+class GaussianBelief:
+    """A Gaussian message in information (canonical) form ``φ(x) = exp(-½ xᵀΛx + ηᵀx + g)``.
+
+    ``eta`` is the information vector ``η``, ``precision`` is ``Λ`` (symmetric positive-definite),
+    ``log_scale`` is ``g``. The product of two canonical potentials just *adds* ``(η, Λ, g)`` — the
+    Gaussian analog of :class:`Categorical`'s log-add — so :meth:`combine` is elementwise addition. And
+    ``log_mass`` is ``log ∫ φ``: under the filtering recursion the running message is
+    ``φ_t(x_t) = p(x_t, y_{0:t})``, so ``log_mass`` is ``log p(y_{0:t})`` and the final message's
+    ``log_mass`` is the data log-likelihood — exactly parallel to Categorical.
+    """
+
+    eta: Float
+    precision: Float
+    log_scale: float = 0.0
+
+    def combine(self, factor: GaussianBelief, /) -> GaussianBelief:
+        """``⊗`` — multiply the canonical potentials (add information vectors, precisions, and scales)."""
+        return GaussianBelief(
+            self.eta + factor.eta, self.precision + factor.precision, self.log_scale + factor.log_scale
+        )
+
+    def log_mass(self) -> float:
+        """``log ∫ φ(x) dx = g + d/2·log 2π − ½·log|Λ| + ½·ηᵀΛ⁻¹η``."""
+        dim = int(self.eta.shape[0])
+        _, log_det = np.linalg.slogdet(self.precision)
+        quad = float(self.eta @ np.linalg.solve(self.precision, self.eta))
+        return float(self.log_scale + 0.5 * dim * np.log(2.0 * np.pi) - 0.5 * float(log_det) + 0.5 * quad)
+
+    def normalized(self) -> GaussianBelief:
+        """The belief rescaled to unit mass (a proper density: ``log_mass == 0``)."""
+        return GaussianBelief(self.eta, self.precision, self.log_scale - self.log_mass())
+
+    def mean(self) -> Float:
+        """The distribution mean ``μ = Λ⁻¹η``."""
+        mean: Float = np.linalg.solve(self.precision, self.eta)
+        return mean
+
+    def covariance(self) -> Float:
+        """The distribution covariance ``Σ = Λ⁻¹``."""
+        cov: Float = np.linalg.inv(self.precision)
+        return cov

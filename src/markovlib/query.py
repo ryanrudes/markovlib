@@ -14,8 +14,9 @@ import numpy.typing as npt
 
 from markovlib.dispatch import resolve_engine
 from markovlib.engines.exact_chain import ExactChain, SmoothResult
+from markovlib.engines.gaussian import FilterResult, GaussianChain
 from markovlib.engines.segmental import SegmentalChain
-from markovlib.model import DiscreteChain, SemiMarkovChain
+from markovlib.model import DiscreteChain, LinearGaussian, SemiMarkovChain
 from markovlib.resolution import Intractable
 
 Float = npt.NDArray[np.float64]
@@ -51,3 +52,13 @@ def decode(model: DiscreteChain | SemiMarkovChain, log_emissions: Float) -> npt.
         return engine.decode(model, log_emissions)
     assert isinstance(engine, SegmentalChain) and isinstance(model, SemiMarkovChain)
     return engine.decode(model, log_emissions)
+
+
+def filter(model: LinearGaussian, observations: Float) -> FilterResult:
+    """Kalman filtering for a linear-Gaussian model — the forward recursion with a Gaussian belief."""
+    resolution = resolve_engine(model, "filter")
+    if isinstance(resolution, Intractable):
+        raise ValueError(resolution.reason)
+    engine = resolution.engine
+    assert isinstance(engine, GaussianChain)
+    return engine.filter(model, observations)

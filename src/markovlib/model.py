@@ -57,3 +57,21 @@ class SemiMarkovChain:
     def n_states(self) -> int:
         """The number of discrete states ``S``."""
         return int(self.log_init.shape[0])
+
+
+@dataclass(frozen=True)
+class LinearGaussian:
+    """A linear-Gaussian state-space model — the continuous-state sibling of :class:`DiscreteChain`.
+
+    ``x_{t+1} = A x_t + N(0, Q)``; ``y_t = H x_t + N(0, R)``; ``x_0 ~ N(m0, P0)``. Shapes: ``transition``
+    ``A`` and ``process_noise`` ``Q`` are ``(D, D)``; ``observation`` ``H`` is ``(M, D)``; ``obs_noise``
+    ``R`` is ``(M, M)``; ``init_mean`` ``m0`` is ``(D,)``; ``init_cov`` ``P0`` is ``(D, D)``. Decoded by
+    the Kalman filter, which is the *same* forward recursion as the HMM with a Gaussian belief.
+    """
+
+    transition: Float
+    process_noise: Float
+    observation: Float
+    obs_noise: Float
+    init_mean: Float
+    init_cov: Float

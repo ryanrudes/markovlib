@@ -8,28 +8,33 @@ queries (:func:`smooth` / :func:`decode` / :func:`loglik`).
 
 from __future__ import annotations
 
-from markovlib.belief import Belief, Categorical
+from markovlib.belief import Belief, Categorical, GaussianBelief
 from markovlib.dispatch import resolve_engine
 from markovlib.duration import DurationModel, NegBinomDuration
 from markovlib.engines.exact_chain import ExactChain, ExpectedStats, SmoothResult
+from markovlib.engines.gaussian import FilterResult, GaussianChain
 from markovlib.engines.segmental import SegmentalChain
 from markovlib.learn import FitResult, fit
-from markovlib.model import DiscreteChain, SemiMarkovChain
-from markovlib.query import decode, loglik, smooth
+from markovlib.model import DiscreteChain, LinearGaussian, SemiMarkovChain
+from markovlib.query import decode, filter, loglik, smooth
 from markovlib.resolution import Approximate, EngineResolution, Exact, Intractable
 from markovlib.semiring import MaxPlus, Semiring, SumProduct
 
 __all__ = [
     "Belief",
     "Categorical",
+    "GaussianBelief",
     "DiscreteChain",
     "SemiMarkovChain",
+    "LinearGaussian",
     "DurationModel",
     "NegBinomDuration",
     "ExactChain",
     "SegmentalChain",
+    "GaussianChain",
     "SmoothResult",
     "ExpectedStats",
+    "FilterResult",
     "FitResult",
     "fit",
     "Semiring",
@@ -43,4 +48,5 @@ __all__ = [
     "smooth",
     "decode",
     "loglik",
+    "filter",
 ]
