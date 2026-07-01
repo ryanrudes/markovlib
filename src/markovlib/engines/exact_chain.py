@@ -16,7 +16,13 @@ import numpy.typing as npt
 from scipy.special import logsumexp
 
 from markovlib.belief import Categorical
-from markovlib.engines.recursion import backward_messages, categorical_predict, forward, viterbi
+from markovlib.engines.recursion import (
+    backward_messages,
+    categorical_predict,
+    forward,
+    forward_filter_backward_sample,
+    viterbi,
+)
 from markovlib.model import DiscreteChain
 from markovlib.semiring import SumProduct
 
@@ -94,3 +100,7 @@ class ExactChain:
         """The single most likely state path (Viterbi / MAP, max-plus)."""
         path, _ = viterbi(model.log_init, model.log_trans, log_emissions)
         return path
+
+    def sample_path(self, model: DiscreteChain, log_emissions: Float, rng: np.random.Generator) -> npt.NDArray[np.intp]:
+        """A posterior state-path *sample* — the stochastic sibling of :meth:`decode` (forward-filter backward-sample)."""
+        return forward_filter_backward_sample(model.log_init, model.log_trans, log_emissions, rng)

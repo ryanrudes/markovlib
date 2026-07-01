@@ -3,7 +3,7 @@
 Public surface (vertical slice): the model (:class:`DiscreteChain`), the engine
 (:class:`ExactChain`), the semirings (:class:`SumProduct` / :class:`MaxPlus`), the decidable dispatch
 (:func:`resolve_engine` → :class:`Exact` / :class:`Approximate` / :class:`Intractable`), and the uniform
-queries (:func:`smooth` / :func:`decode` / :func:`loglik`).
+queries (:func:`smooth` / :func:`decode` / :func:`sample_path` / :func:`loglik`).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from markovlib.engines.segmental import SegmentalChain
 from markovlib.learn import FitResult, fit
 from markovlib.model import DiscreteChain, LinearGaussian, SemiMarkovChain, StateSpaceModel
 from markovlib.product import product_log_emission, product_marginals, product_membership
-from markovlib.query import decode, filter, loglik, particle_filter, smooth
+from markovlib.query import decode, filter, loglik, particle_filter, sample_path, smooth
 from markovlib.resolution import Approximate, EngineResolution, Exact, Intractable
 from markovlib.semiring import MaxPlus, Semiring, SumProduct
 
@@ -56,6 +56,7 @@ __all__ = [
     "loglik",
     "filter",
     "particle_filter",
+    "sample_path",
     "product_membership",
     "product_log_emission",
     "product_marginals",

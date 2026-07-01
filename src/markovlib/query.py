@@ -1,4 +1,4 @@
-"""The uniform query surface: ``smooth`` / ``decode`` / ``loglik``.
+"""The uniform query surface: ``smooth`` / ``decode`` / ``sample_path`` / ``loglik``.
 
 Each is the same two steps — :func:`~markovlib.dispatch.resolve_engine` to decide *which* engine
 resolves the query, then run it — so the caller's interface is independent of the resolved engine. An
@@ -72,6 +72,16 @@ def decode(model: DiscreteChain | SemiMarkovChain, log_emissions: Float) -> npt.
         return engine.decode(model, log_emissions)
     assert isinstance(engine, SegmentalChain) and isinstance(model, SemiMarkovChain)
     return engine.decode(model, log_emissions)
+
+
+def sample_path(model: DiscreteChain, log_emissions: Float, *, rng: np.random.Generator | int) -> npt.NDArray[np.intp]:
+    """Posterior state-path sample (forward-filter backward-sample) — the stochastic sibling of :func:`decode`.
+
+    ``rng`` reifies the randomness: pass an ``int`` seed for a one-shot draw, or thread a ``numpy``
+    ``Generator`` to make a *sequence* of draws (e.g. the label step of a blocked-Gibbs sweep) reproducible.
+    """
+    generator = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
+    return _exact_chain(model, "sample_path").sample_path(model, log_emissions, generator)
 
 
 def filter(model: LinearGaussian, observations: Float) -> FilterResult:

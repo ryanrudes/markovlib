@@ -92,3 +92,35 @@ def viterbi(log_init: Float, log_trans: Float, log_em: Float) -> tuple[Int, floa
     for t in range(n_steps - 2, -1, -1):
         path[t] = psi[t + 1, path[t + 1]]
     return path, float(delta[-1].max())
+
+
+def forward_filter_backward_sample(log_init: Float, log_trans: Float, log_em: Float, rng: np.random.Generator) -> Int:
+    """Draw a state path ``z_{1:T} ~ p(z | observations)`` by forward-filter, backward-sample (FFBS).
+
+    The **stochastic** sibling of :func:`viterbi`: the same forward pass — here the sum-product filter
+    ``α[t] = em[t] + logsumexp_i(α[t-1, i] + trans_{t-1}[i, :])`` — then a backward pass that *samples*
+    each state from ``p(z_t | z_{t+1}, x_{1:t}) ∝ α[t] · trans_t[:, z_{t+1}]`` rather than taking the
+    argmax. The drawn path is an exact *joint* sample from the posterior over state sequences (not
+    independent per-frame draws). Randomness is reified as the explicit ``rng`` — thread one
+    ``Generator`` to make a *sequence* of draws (e.g. the label step of a blocked-Gibbs sweep)
+    reproducible. Supports homogeneous ``(S, S)`` and time-varying ``(T-1, S, S)`` ``log_trans``.
+    """
+    n_steps, n_states = log_em.shape
+    homogeneous = log_trans.ndim == 2
+    log_alpha = np.empty((n_steps, n_states), dtype=np.float64)
+    log_alpha[0] = log_init + log_em[0]
+    for t in range(1, n_steps):
+        transition = log_trans if homogeneous else log_trans[t - 1]
+        log_alpha[t] = log_em[t] + logsumexp(log_alpha[t - 1][:, None] + transition, axis=0)
+    path = np.empty(n_steps, dtype=np.intp)
+    path[-1] = _sample_categorical(log_alpha[-1], rng)
+    for t in range(n_steps - 2, -1, -1):
+        transition = log_trans if homogeneous else log_trans[t]
+        path[t] = _sample_categorical(log_alpha[t] + transition[:, path[t + 1]], rng)
+    return path
+
+
+def _sample_categorical(log_weights: Float, rng: np.random.Generator) -> np.intp:
+    """Sample one category ``∝ exp(log_weights)`` via the Gumbel-max trick (log-space, no normalization)."""
+    gumbel = rng.gumbel(size=log_weights.shape)
+    return np.intp(np.argmax(log_weights + gumbel))

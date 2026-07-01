@@ -2,8 +2,8 @@
 
 The deliberate analog of fungeom's decidable dispatch: given a model and a query, return *evidence*
 (:data:`~markovlib.resolution.EngineResolution`) naming the engine and its exactness, never a silent
-best-effort. A :class:`~markovlib.model.DiscreteChain` resolves ``smooth`` / ``decode`` / ``loglik``
-exactly; a :class:`~markovlib.model.SemiMarkovChain` resolves ``decode`` exactly; a
+best-effort. A :class:`~markovlib.model.DiscreteChain` resolves ``smooth`` / ``decode`` / ``sample_path`` /
+``loglik`` exactly; a :class:`~markovlib.model.SemiMarkovChain` resolves ``decode`` exactly; a
 :class:`~markovlib.model.LinearGaussian` resolves ``filter`` exactly (the Kalman filter). New engines
 register here, each declaring ``Exact`` or ``Approximate`` for the queries they resolve.
 """
@@ -17,7 +17,7 @@ from markovlib.engines.segmental import SegmentalChain
 from markovlib.model import DiscreteChain, LinearGaussian, SemiMarkovChain, StateSpaceModel
 from markovlib.resolution import Approximate, EngineResolution, Exact, Intractable
 
-_CHAIN_QUERIES = frozenset({"smooth", "decode", "loglik"})
+_CHAIN_QUERIES = frozenset({"smooth", "decode", "loglik", "sample_path"})
 
 
 def resolve_engine(model: object, query: str) -> EngineResolution:
