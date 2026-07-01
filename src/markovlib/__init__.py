@@ -17,6 +17,7 @@ from markovlib.engines.particle import ParticleFilter, ParticleResult
 from markovlib.engines.segmental import SegmentalChain
 from markovlib.learn import FitResult, fit
 from markovlib.model import DiscreteChain, LinearGaussian, SemiMarkovChain, StateSpaceModel
+from markovlib.product import product_log_emission, product_marginals, product_membership
 from markovlib.query import decode, filter, loglik, particle_filter, smooth
 from markovlib.resolution import Approximate, EngineResolution, Exact, Intractable
 from markovlib.semiring import MaxPlus, Semiring, SumProduct
@@ -55,4 +56,7 @@ __all__ = [
     "loglik",
     "filter",
     "particle_filter",
+    "product_membership",
+    "product_log_emission",
+    "product_marginals",
 ]
