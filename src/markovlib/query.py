@@ -9,6 +9,7 @@ the plain :class:`~markovlib.model.DiscreteChain` today.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import overload
 
 import numpy as np
@@ -109,3 +110,24 @@ def particle_filter(
     engine = resolution.engine
     assert isinstance(engine, ParticleFilter)
     return engine.filter(model, observations, n_particles=n_particles, seed=seed, resample_threshold=resample_threshold)
+
+
+def particle_smooth(
+    model: StateSpaceModel,
+    observations: Float,
+    log_transition: Callable[[Float, Float], Float],
+    *,
+    n_particles: int,
+    seed: int,
+) -> Float:
+    """Rao-Blackwellized particle smoothing — the smoothing sibling of :func:`particle_filter` (approximate).
+
+    ``log_transition(states_from, states_to)`` returns the ``(U_from, U_to)`` log-transition matrix between
+    visited states — the evaluable transition a smoother needs but a bootstrap filter never does.
+    """
+    resolution = resolve_engine(model, "smooth")
+    if isinstance(resolution, Intractable):
+        raise ValueError(resolution.reason)
+    engine = resolution.engine
+    assert isinstance(engine, ParticleFilter)
+    return engine.smooth(model, observations, log_transition, n_particles=n_particles, seed=seed)

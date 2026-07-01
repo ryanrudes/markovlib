@@ -28,6 +28,6 @@ def resolve_engine(model: object, query: str) -> EngineResolution:
         return Exact(SegmentalChain())
     if isinstance(model, LinearGaussian) and query in {"filter", "smooth"}:
         return Exact(GaussianChain())
-    if isinstance(model, StateSpaceModel) and query == "filter":
+    if isinstance(model, StateSpaceModel) and query in {"filter", "smooth"}:
         return Approximate(ParticleFilter(), "bootstrap particle filter", "O(1/sqrt(N)) Monte Carlo")
     return Intractable(f"no engine for {type(model).__name__} / query={query!r}")

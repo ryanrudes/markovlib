@@ -15,6 +15,7 @@ falls below ``resample_threshold · N``) and the marginal-likelihood estimate ar
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -82,3 +83,60 @@ class ParticleFilter:
                 log_weights = np.full(n_particles, -np.log(n_particles))
 
         return ParticleResult(means=np.array(means), loglik=loglik, ess=np.array(ess_per_step))
+
+    def smooth(
+        self,
+        model: StateSpaceModel,
+        observations: Float,
+        log_transition: Callable[[Float, Float], Float],
+        *,
+        n_particles: int,
+        seed: int,
+    ) -> Float:
+        """Rao-Blackwellized particle SMOOTHER — the backward-smoothing completion of :meth:`filter`.
+
+        A forward bootstrap pass (as in :meth:`filter`, resampling every step) that additionally *records*,
+        per frame, the distinct particle states the cloud occupies and their forward log-weights; then a
+        backward Rao-Blackwellized FFBS over only those *visited* states — never the full state space — that
+        turns the forward weights into smoothing weights. Returns the *smoothed* Rao-Blackwellized means
+        ``(T, D)``: per frame the smoothing-weighted average of the visited state vectors, lower-variance
+        than raw particle frequencies by the Rao-Blackwell theorem.
+
+        A smoother needs the transition to be *evaluable* — a bootstrap filter only ever *samples* it —
+        so ``log_transition(states_from, states_to)`` must return the ``(U_from, U_to)`` matrix of
+        ``log p(state_to | state_from)`` between two small sets of visited states. Deterministic given ``seed``.
+        """
+        rng = np.random.default_rng(seed)
+        observations = np.asarray(observations, dtype=np.float64)
+        n_frames = observations.shape[0]
+        visited: list[Float] = []  # (U_t, D) distinct states occupied at frame t
+        forward_logw: list[Float] = []  # (U_t,) forward log-mass on each (the filtering dist, in log)
+
+        particles = np.asarray(model.sample_prior(rng, n_particles), dtype=np.float64)
+        for step in range(n_frames):
+            if step > 0:
+                particles = np.asarray(model.propagate(rng, particles), dtype=np.float64)
+            emit = np.asarray(model.log_likelihood(observations[step], particles), dtype=np.float64)
+            uniq, inverse = np.unique(particles, axis=0, return_inverse=True)
+            inverse = inverse.ravel()
+            visited.append(uniq)
+            forward_logw.append(np.array([logsumexp(emit[inverse == k]) for k in range(uniq.shape[0])]))
+            weights = np.exp(emit - logsumexp(emit))
+            particles = particles[_systematic_resample(weights, rng)]
+
+        # Backward Rao-Blackwellized FFBS over the visited supports only (never the full state space).
+        smoothing_logw: list[Float] = [np.zeros(0) for _ in range(n_frames)]
+        smoothing_logw[-1] = forward_logw[-1] - logsumexp(forward_logw[-1])
+        for t in range(n_frames - 2, -1, -1):
+            forward_t = forward_logw[t] - logsumexp(forward_logw[t])
+            log_t = np.asarray(log_transition(visited[t], visited[t + 1]), dtype=np.float64)  # (U_t, U_{t+1})
+            predictive = logsumexp(forward_t[:, None] + log_t, axis=0)  # (U_{t+1},) one-step predictive
+            ratio = smoothing_logw[t + 1] - predictive
+            smoothed = forward_t + logsumexp(log_t + ratio[None, :], axis=1)  # (U_t,)
+            smoothing_logw[t] = smoothed - logsumexp(smoothed)
+
+        means = np.empty((n_frames, visited[0].shape[1]), dtype=np.float64)
+        for t in range(n_frames):
+            weights = np.exp(smoothing_logw[t] - logsumexp(smoothing_logw[t]))
+            means[t] = weights @ visited[t]
+        return means
